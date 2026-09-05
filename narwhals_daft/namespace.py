@@ -7,8 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 import daft
 import daft.functions as F
+from narwhals._expression_parsing import (
+    combine_alias_output_names,
+    combine_evaluate_output_names,
+    evaluate_output_names_and_aliases,
+)
 from narwhals._utils import Implementation, not_implemented
 from narwhals.compliant import CompliantNamespace
+from narwhals.exceptions import DuplicateError
 
 from narwhals_daft.dataframe import DaftLazyFrame
 from narwhals_daft.expr import DaftExpr
@@ -190,26 +196,24 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
     cov = not_implemented()
 
     def struct(self, *exprs: DaftExpr) -> DaftExpr:
-        from narwhals._expression_parsing import (
-            combine_alias_output_names,
-            combine_evaluate_output_names,
-            evaluate_output_names_and_aliases,
-        )
-
         def func(df: DaftLazyFrame) -> list[Expression]:
-            import daft.functions.struct as _struct
-
-            names_to_cols = {
-                alias: native_expr
+            names_and_fields = [
+                (alias, native_expr)
                 for expr in exprs
                 for native_expr, _, alias in zip(
                     expr(df),
                     *evaluate_output_names_and_aliases(expr, df, []),
                     strict=True,
                 )
-            }
-            aliased = [col.alias(name) for name, col in names_to_cols.items()]
-            return [_struct.to_struct(*aliased)]
+            ]
+            names = [name for name, _ in names_and_fields]
+            # Daft silently keeps the last field for a repeated name, Polars raises.
+            if duplicates := {name for name in names if names.count(name) > 1}:
+                msg = f"multiple fields with name {duplicates.pop()!r} found"
+                raise DuplicateError(msg)
+            return [
+                F.to_struct(*(field.alias(name) for name, field in names_and_fields))
+            ]
 
         return self._expr(
             func,
