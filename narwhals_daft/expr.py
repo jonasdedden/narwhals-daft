@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from daft import Expression
     from narwhals._utils import Version, _LimitedContext
     from narwhals.dtypes import DType
-    from narwhals.typing import RankMethod
+    from narwhals.typing import RankMethod, RollingInterpolationMethod
     from typing_extensions import TypeIs
 
     from narwhals_daft.dataframe import DaftLazyFrame
@@ -624,57 +624,20 @@ class DaftExpr(CompliantExpr["DaftLazyFrame", "Expression"]):
         return self._with_callable(lambda expr: expr.skew())
 
     def median(self) -> DaftExpr:
-        def func(expr: Expression) -> Expression:
-            return expr.median()
+        return self._with_callable(F.median)
 
-        def window_func(
-            df: DaftLazyFrame, inputs: WindowInputs
-        ) -> Sequence[Expression]:
-            assert not inputs.order_by  # noqa: S101
-            return [
-                self._window_expression(expr.median(), inputs.partition_by)
-                for expr in self(df)
-            ]
-
-        return self._with_callable(func, window_func)
-
-    def quantile(self, quantile: float, interpolation: str) -> DaftExpr:
+    def quantile(
+        self, quantile: float, interpolation: RollingInterpolationMethod
+    ) -> DaftExpr:
         if interpolation != "linear":
             msg = "Only linear interpolation is supported for Daft quantile."
             raise NotImplementedError(msg)
-
-        def func(expr: Expression) -> Expression:
-            return F.percentile(expr, quantile)
-
-        def window_func(
-            df: DaftLazyFrame, inputs: WindowInputs
-        ) -> Sequence[Expression]:
-            assert not inputs.order_by  # noqa: S101
-            return [
-                self._window_expression(
-                    F.percentile(expr, quantile), inputs.partition_by
-                )
-                for expr in self(df)
-            ]
-
-        return self._with_callable(func, window_func)
+        return self._with_callable(lambda expr: F.percentile(expr, quantile))
 
     def any_value(self, *, ignore_nulls: bool) -> DaftExpr:
-        def func(expr: Expression) -> Expression:
-            return F.any_value(expr, ignore_nulls=ignore_nulls)
-
-        def window_func(
-            df: DaftLazyFrame, inputs: WindowInputs
-        ) -> Sequence[Expression]:
-            assert not inputs.order_by  # noqa: S101
-            return [
-                self._window_expression(
-                    F.any_value(expr, ignore_nulls=ignore_nulls), inputs.partition_by
-                )
-                for expr in self(df)
-            ]
-
-        return self._with_callable(func, window_func)
+        return self._with_callable(
+            lambda expr: F.any_value(expr, ignore_nulls=ignore_nulls)
+        )
 
     @classmethod
     def _is_expr(cls, obj: DaftExpr) -> TypeIs[DaftExpr]:
