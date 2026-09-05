@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import daft.functions as F
@@ -12,6 +13,10 @@ if TYPE_CHECKING:
     from daft import Expression
 
     from narwhals_daft.expr import DaftExpr
+
+
+_REGEX_METACHARACTERS = re.compile(r"[\\^$.|?*+()\[\]{}]")
+"""Characters that make a pattern a regex rather than a literal, as in Polars."""
 
 
 class ExprStringNamespace(StringNamespace["DaftExpr"]):
@@ -89,61 +94,47 @@ class ExprStringNamespace(StringNamespace["DaftExpr"]):
     def replace(
         self, value: DaftExpr, pattern: str, *, literal: bool, n: int
     ) -> DaftExpr:
-        # `n` is the number of replacements: 1 = first occurrence, -1 (or
-        # negative) = all occurrences. Daft only has replace-all kernels, so
-        # implement first-`n` via find + substr reconstruction.
-        if n == 0:
-            return self.compliant
         if n < 0:
             return self.replace_all(value, pattern, literal=literal)
-        # Check for multivalue + n>1 which narwhals does not support.
-        # At compliant level `value` is always a DaftExpr (strs become list),
-        # so detect literal via metadata: if it's a literal, allow n>1 by
-        # iterating; otherwise raise like other backends do.
-        is_literal_value = bool(
-            getattr(value, "_metadata", None) and value._metadata.is_literal
-        )  # type: ignore[union-attr]
-        if n > 1 and not is_literal_value:
-            msg = "'n > 1' not yet supported for multivalue replacement."
+        if n == 0:
+            return self.compliant
+        is_literal_pattern = literal or not _REGEX_METACHARACTERS.search(pattern)
+        if n > 1 and not (pattern and is_literal_pattern):
+            # Re-scanning the remainder after a match changes the meaning of
+            # anchors and word boundaries, and an empty pattern matches between
+            # every character, so `n > 1` is limited to non-empty literal
+            # patterns (like in Polars).
+            kind = "regex" if pattern else "empty pattern"
+            msg = f"{kind} replacement with 'n > 1' not yet supported"
             raise NotImplementedError(msg)
+        # Daft only ships replace-all kernels. Anchoring the pattern behind a
+        # lazy prefix group makes the first match addressable: group 0 spans
+        # everything up to and including it, group 1 only the text before it,
+        # and both are null when there is no match. `(?s)` lets the prefix span
+        # newlines and the non-capturing wrapper keeps top-level alternation in
+        # `pattern` contained.
+        needle = re.escape(pattern) if literal else pattern
+        anchored = f"(?s)^(.*?)(?:{needle})"
 
-        def _replace_once(expr: Expression, value: Expression) -> Expression:
-            expr_len = F.length(expr).cast("int64")
-            if literal:
-                idx = F.find(expr, pattern).cast("int64")
-                match_len = lit(len(pattern)).cast("int64")
-                suffix_start = idx + match_len
-                prefix = F.when(idx == lit(0), lit("")).otherwise(
-                    F.substr(expr, lit(0), idx)
-                )
-                suffix = F.when(suffix_start >= expr_len, lit("")).otherwise(
-                    F.substr(expr, suffix_start, expr_len)
-                )
-                return F.when(idx == lit(-1), expr).otherwise(
-                    F.when(expr.is_null() | idx.is_null(), expr).otherwise(
-                        prefix + value + suffix
-                    )
-                )
-            # Regex: extract first match, locate it, then splice.
-            match = F.regexp_extract(expr, pattern)
-            match_len = F.length(match).cast("int64")
-            idx = F.find(expr, match).cast("int64")
-            suffix_start = idx + match_len
-            prefix = F.when(idx == lit(0), lit("")).otherwise(
-                F.substr(expr, lit(0), idx)
-            )
-            suffix = F.when(suffix_start >= expr_len, lit("")).otherwise(
-                F.substr(expr, suffix_start, expr_len)
-            )
-            return F.when(match.is_null(), expr).otherwise(prefix + value + suffix)
+        def func(expr: Expression, value: Expression) -> Expression:
+            # Splicing with `concat` inserts `value` verbatim, whereas the
+            # replacement of `regexp_replace` expands `$1`/`\1` references and
+            # drops backslashes.
+            done, rest = lit(""), expr
+            for _ in range(n):
+                head = F.regexp_extract(rest, anchored, 0)
+                prefix = F.regexp_extract(rest, anchored, 1)
+                matched = head.not_null()
+                done = F.when(
+                    matched, F.concat(F.concat(done, prefix), value)
+                ).otherwise(done)
+                # `substr` yields null rather than "" once the offset reaches the end.
+                rest = F.when(
+                    matched, F.substr(rest, F.length(head)).fill_null("")
+                ).otherwise(rest)
+            return F.concat(done, rest)
 
-        result = self.compliant
-        for _ in range(n):
-            result = result._with_elementwise(
-                _replace_once,
-                value=value,  # type: ignore[arg-type]
-            )
-        return result
+        return self.compliant._with_elementwise(func, value=value)
 
     contains = not_implemented()
     to_datetime = not_implemented()
