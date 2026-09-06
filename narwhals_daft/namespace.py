@@ -207,7 +207,7 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
 
         return self._expr._from_elementwise_horizontal_op(func, *exprs)
 
-    def _pairwise_variances(
+    def _pairwise_variances_and_covariance(
         self,
         df: DaftLazyFrame,
         a: DaftExpr,
@@ -216,7 +216,7 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
         ddof: int,
         window: Window | None,
     ) -> tuple[Expression, Expression, Expression]:
-        """Variances of `a`, `b` and `a + b` over the rows where both are non-null.
+        """Variances of `a` and `b`, and their covariance, over the rows where both are non-null.
 
         NOTE: Daft has no covariance or correlation aggregates and does not allow
         nesting aggregations (or window functions), which rules out a centred
@@ -235,7 +235,7 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
         var_a, var_b, var_ab = (F.var(expr, ddof) for expr in (a_, b_, a_ + b_))
         if window is not None:
             var_a, var_b, var_ab = (var.over(window) for var in (var_a, var_b, var_ab))
-        return var_a, var_b, var_ab
+        return var_a, var_b, (var_ab - var_a - var_b) / lit(2.0)
 
     def _corr_cov(
         self,
@@ -267,24 +267,22 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
             raise NotImplementedError(msg)
 
         def corr(df: DaftLazyFrame, window: Window | None) -> Expression:
-            var_a, var_b, var_ab = self._pairwise_variances(
+            var_a, var_b, cov_ab = self._pairwise_variances_and_covariance(
                 df, a, b, ddof=0, window=window
             )
-            denominator = lit(2.0) * (var_a * var_b).sqrt()
+            denominator = (var_a * var_b).sqrt()
             # The correlation is undefined when either variance is zero.
-            return F.when(
-                denominator > lit(0.0), (var_ab - var_a - var_b) / denominator
-            )
+            return F.when(denominator > lit(0.0), cov_ab / denominator)
 
         return self._corr_cov(a, b, corr)
 
     def cov(self, a: DaftExpr, b: DaftExpr, *, ddof: int) -> DaftExpr:
         def cov(df: DaftLazyFrame, window: Window | None) -> Expression:
-            var_a, var_b, var_ab = self._pairwise_variances(
+            _, _, cov_ab = self._pairwise_variances_and_covariance(
                 df, a, b, ddof=ddof, window=window
             )
             # `var` is already null when there are no more than `ddof` valid pairs.
-            return (var_ab - var_a - var_b) / lit(2.0)
+            return cov_ab
 
         return self._corr_cov(a, b, cov)
 
