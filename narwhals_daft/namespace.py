@@ -14,12 +14,12 @@ from narwhals._expression_parsing import (
 )
 from narwhals._utils import (
     Implementation,
+    check_column_names_are_unique,
     ensure_path_source,
     not_implemented,
     validate_separators,
 )
 from narwhals.compliant import CompliantNamespace
-from narwhals.exceptions import DuplicateError
 
 from narwhals_daft.dataframe import DaftLazyFrame
 from narwhals_daft.expr import DaftExpr
@@ -229,11 +229,8 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
                     strict=True,
                 )
             ]
-            names = [name for name, _ in names_and_fields]
             # Daft silently keeps the last field for a repeated name, Polars raises.
-            if duplicates := {name for name in names if names.count(name) > 1}:
-                msg = f"multiple fields with name {duplicates.pop()!r} found"
-                raise DuplicateError(msg)
+            check_column_names_are_unique([name for name, _ in names_and_fields])
             return [
                 F.to_struct(*(field.alias(name) for name, field in names_and_fields))
             ]
