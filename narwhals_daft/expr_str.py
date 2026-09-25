@@ -73,6 +73,17 @@ class ExprStringNamespace(StringNamespace["DaftExpr"]):
             raise NotImplementedError(msg)
         return self.compliant._with_elementwise(lambda expr: F.lstrip(F.rstrip(expr)))
 
+    def _strip_chars_regex(self, pattern: str) -> DaftExpr:
+        return self.compliant._with_elementwise(
+            lambda expr: F.regexp_replace(expr, pattern=pattern, replacement="")
+        )
+
+    def strip_chars_start(self, characters: str) -> DaftExpr:
+        return self._strip_chars_regex(f"^{_char_class(characters)}+")
+
+    def strip_chars_end(self, characters: str) -> DaftExpr:
+        return self._strip_chars_regex(f"{_char_class(characters)}+$")
+
     def replace_all(self, value: DaftExpr, pattern: str, *, literal: bool) -> DaftExpr:
         if literal:
             return self.compliant._with_elementwise(
@@ -93,3 +104,8 @@ class ExprStringNamespace(StringNamespace["DaftExpr"]):
     pad_start = not_implemented()
     pad_end = not_implemented()
     to_time = not_implemented()
+
+
+def _char_class(characters: str) -> str:
+    """Build a regex character class matching any of `characters` literally."""
+    return "[" + "".join(f"\\x{{{ord(c):x}}}" for c in characters) + "]"
