@@ -163,8 +163,6 @@ TESTS_THAT_NEED_FIX = [
     "test_std_broadcating",
     "test_str_pad_end_expr",
     "test_str_pad_start_expr",
-    "test_str_replace_edge_expr_scalar",
-    "test_str_replace_null_value_expr",
     "test_str_replace_value_edge_expr_scalar",
     "test_str_slice",
     "test_str_slice_negative_offset",
