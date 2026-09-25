@@ -172,8 +172,6 @@ TESTS_THAT_NEED_FIX = [
     "test_str_slice_negative_offset",
     "test_str_strip_chars",
     "test_str_zfill",
-    "test_struct_duplicate_names_raises",
-    "test_struct_nested",
     "test_timestamp_dates",
     "test_timestamp_datetimes",
     "test_timestamp_datetimes_tz_aware",
