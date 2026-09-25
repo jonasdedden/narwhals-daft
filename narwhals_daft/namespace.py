@@ -3,28 +3,27 @@ from __future__ import annotations
 import operator
 import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import daft
 import daft.functions as F
-from narwhals._utils import (
-    Implementation,
-    ensure_path_source,
-    not_implemented,
-    validate_separators,
-)
+from narwhals._utils import Implementation, not_implemented
 from narwhals.compliant import CompliantNamespace
 
 from narwhals_daft.dataframe import DaftLazyFrame
 from narwhals_daft.expr import DaftExpr
 from narwhals_daft.selectors import DaftSelectorNamespace
-from narwhals_daft.utils import lit, narwhals_to_native_dtype
+from narwhals_daft.utils import (
+    ensure_path_source,
+    lit,
+    narwhals_to_native_dtype,
+    validate_separator,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from daft import DataFrame, Expression
-    from narwhals._typing import PluginName
     from narwhals._utils import Version
     from narwhals.dtypes import DType
     from narwhals.typing import ConcatMethod, NormalizedSource
@@ -200,12 +199,12 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
     def scan_csv(
         self, source: NormalizedSource, *, separator: str = ",", **kwds: Any
     ) -> DaftLazyFrame:
-        validate_separators(separator, ("delimiter",), kwds)
-        path = ensure_path_source(source, cast("PluginName", "daft"))
+        validate_separator(separator, kwds)
+        path = ensure_path_source(source)
         return self.from_native(daft.read_csv(path, delimiter=separator, **kwds))
 
     def scan_parquet(self, source: NormalizedSource, **kwds: Any) -> DaftLazyFrame:
-        path = ensure_path_source(source, cast("PluginName", "daft"))
+        path = ensure_path_source(source)
         return self.from_native(daft.read_parquet(path, **kwds))
 
     concat_str = not_implemented()
