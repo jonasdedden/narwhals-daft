@@ -11,11 +11,12 @@ from daft import Window
 from narwhals._expression_parsing import (
     combine_alias_output_names,
     combine_evaluate_output_names,
+    evaluate_output_names_and_aliases,
 )
 from narwhals._utils import (
     Implementation,
+    check_column_names_are_unique,
     ensure_path_source,
-    not_implemented,
     validate_separators,
 )
 from narwhals.compliant import CompliantNamespace
@@ -309,4 +310,26 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
 
         return self._corr_cov(a, b, cov)
 
-    struct = not_implemented()
+    def struct(self, *exprs: DaftExpr) -> DaftExpr:
+        def func(df: DaftLazyFrame) -> list[Expression]:
+            names_and_fields = [
+                (alias, native_expr)
+                for expr in exprs
+                for native_expr, _, alias in zip(
+                    expr(df),
+                    *evaluate_output_names_and_aliases(expr, df, []),
+                    strict=True,
+                )
+            ]
+            # Daft silently keeps the last field for a repeated name, Polars raises.
+            check_column_names_are_unique([name for name, _ in names_and_fields])
+            return [
+                F.to_struct(*(field.alias(name) for name, field in names_and_fields))
+            ]
+
+        return self._expr(
+            func,
+            evaluate_output_names=combine_evaluate_output_names(*exprs),
+            alias_output_names=combine_alias_output_names(*exprs),
+            version=self._version,
+        )
