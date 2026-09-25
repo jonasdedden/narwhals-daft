@@ -3,11 +3,16 @@ from __future__ import annotations
 import operator
 import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import daft
 import daft.functions as F
-from narwhals._utils import Implementation, not_implemented
+from narwhals._utils import (
+    Implementation,
+    ensure_path_source,
+    not_implemented,
+    validate_separators,
+)
 from narwhals.compliant import CompliantNamespace
 
 from narwhals_daft.dataframe import DaftLazyFrame
@@ -19,9 +24,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from daft import DataFrame, Expression
+    from narwhals._typing import PluginName
     from narwhals._utils import Version
     from narwhals.dtypes import DType
-    from narwhals.typing import ConcatMethod
+    from narwhals.typing import ConcatMethod, NormalizedSource
     from typing_extensions import TypeIs
 
     from narwhals_daft.expr import WindowInputs
@@ -184,6 +190,23 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
             return daft.functions.coalesce(*cols)
 
         return self._expr._from_elementwise_horizontal_op(func, *exprs)
+
+    def list(self, *exprs: DaftExpr) -> DaftExpr:
+        def func(cols: Iterable[Expression]) -> Expression:
+            return F.to_list(*cols)
+
+        return self._expr._from_elementwise_horizontal_op(func, *exprs)
+
+    def scan_csv(
+        self, source: NormalizedSource, *, separator: str = ",", **kwds: Any
+    ) -> DaftLazyFrame:
+        validate_separators(separator, ("delimiter",), kwds)
+        path = ensure_path_source(source, cast("PluginName", "daft"))
+        return self.from_native(daft.read_csv(path, delimiter=separator, **kwds))
+
+    def scan_parquet(self, source: NormalizedSource, **kwds: Any) -> DaftLazyFrame:
+        path = ensure_path_source(source, cast("PluginName", "daft"))
+        return self.from_native(daft.read_parquet(path, **kwds))
 
     concat_str = not_implemented()
     corr = not_implemented()
