@@ -86,14 +86,16 @@ class ExprListNamespace(ListNamespace["DaftExpr"]):
 
         def func(df: DaftLazyFrame, expr: Expression) -> Expression:
             # `list_contains` requires `item` to have exactly the element type of
-            # the list, while a Python literal only ever infers to Int64, Float64,
-            # Timestamp[us], ... so cast it, when that is lossless, to the element
-            # type resolved against the frame's schema (plan-time only).
+            # the list, while a Python number only ever infers to Int64 or Float64,
+            # so cast it, when that is lossless, to the element type resolved
+            # against the frame's schema (plan-time only). Any other mismatch
+            # (e.g. a `Timestamp[us]` item on a `Timestamp[ns]` list) raises in
+            # Daft, like it does in Polars.
             list_dtype = df._native_dtype(expr)
             if not (list_dtype.is_list() or list_dtype.is_fixed_size_list()):
                 return F.list_contains(expr, lit(item))
             element_dtype = list_dtype.dtype
-            if not _is_same_family(element_dtype, item_dtype):
+            if not (element_dtype.is_numeric() and item_dtype.is_numeric()):
                 return F.list_contains(expr, lit(item))
             if not _is_representable(item, element_dtype):
                 # e.g. `1.5` or `300` can never be an element of an Int8 list.
@@ -113,16 +115,6 @@ _INTEGER_BOUNDS: dict[str, tuple[int, int]] = {
     "UInt32": (0, (1 << 32) - 1),
     "UInt64": (0, (1 << 64) - 1),
 }
-
-
-def _is_same_family(element_dtype: DataType, item_dtype: DataType) -> bool:
-    """Whether casting a literal of `item_dtype` to `element_dtype` is meaningful."""
-    return (
-        (element_dtype.is_numeric() and item_dtype.is_numeric())
-        or (element_dtype.is_timestamp() and item_dtype.is_timestamp())
-        or (element_dtype.is_duration() and item_dtype.is_duration())
-        or (element_dtype.is_time() and item_dtype.is_time())
-    )
 
 
 def _is_representable(item: Any, element_dtype: DataType) -> bool:
