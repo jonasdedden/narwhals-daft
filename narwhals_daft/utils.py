@@ -123,9 +123,9 @@ def narwhals_to_native_dtype(  # noqa: PLR0912,C901,PLR0911
         return DataType.time("ns")
     if dtype == dtypes.Binary:
         return DataType.binary()
-    if dtype == dtypes.Decimal:  # pragma: no cover
-        msg = "Casting to Decimal is not supported yet."
-        raise NotImplementedError(msg)
+    if isinstance_or_issubclass(dtype, dtypes.Decimal):
+        decimal = dtype if isinstance(dtype, dtypes.Decimal) else dtype()
+        return DataType.decimal128(decimal.precision, decimal.scale)
     if isinstance_or_issubclass(dtype, dtypes.Datetime):
         return DataType.timestamp(dtype.time_unit, dtype.time_zone)
     if isinstance_or_issubclass(dtype, dtypes.Duration):
