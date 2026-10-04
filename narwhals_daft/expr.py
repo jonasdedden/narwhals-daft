@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from daft import Expression
     from narwhals._utils import Version, _LimitedContext
     from narwhals.dtypes import DType
-    from narwhals.typing import RankMethod
+    from narwhals.typing import RankMethod, RollingInterpolationMethod
     from typing_extensions import TypeIs
 
     from narwhals_daft.dataframe import DaftLazyFrame
@@ -620,8 +620,30 @@ class DaftExpr(CompliantExpr["DaftLazyFrame", "Expression"]):
     def sqrt(self) -> DaftExpr:
         return self._with_elementwise(lambda expr: expr.sqrt())
 
+    def sin(self) -> DaftExpr:
+        return self._with_elementwise(lambda expr: expr.sin())
+
+    def cos(self) -> DaftExpr:
+        return self._with_elementwise(lambda expr: expr.cos())
+
     def skew(self) -> DaftExpr:
         return self._with_callable(lambda expr: expr.skew())
+
+    def median(self) -> DaftExpr:
+        return self._with_callable(F.median)
+
+    def quantile(
+        self, quantile: float, interpolation: RollingInterpolationMethod
+    ) -> DaftExpr:
+        if interpolation != "linear":
+            msg = "Only linear interpolation is supported for Daft quantile."
+            raise NotImplementedError(msg)
+        return self._with_callable(lambda expr: F.percentile(expr, quantile))
+
+    def any_value(self, *, ignore_nulls: bool) -> DaftExpr:
+        return self._with_callable(
+            lambda expr: F.any_value(expr, ignore_nulls=ignore_nulls)
+        )
 
     @classmethod
     def _is_expr(cls, obj: DaftExpr) -> TypeIs[DaftExpr]:
@@ -882,18 +904,13 @@ class DaftExpr(CompliantExpr["DaftLazyFrame", "Expression"]):
     ewm_mean = not_implemented()
     kurtosis = not_implemented()
     map_batches = not_implemented()
-    median = not_implemented()
     mode = not_implemented()
-    quantile = not_implemented()
     replace_strict = not_implemented()
     unique = not_implemented()
     first = not_implemented()
     last = not_implemented()
-    cos = not_implemented()
-    sin = not_implemented()
     to_time = not_implemented()
 
     # namespaces
     cat = not_implemented()  # pyright: ignore[reportAssignmentType]
     struct = not_implemented()  # pyright: ignore[reportAssignmentType]
-    any_value = not_implemented()

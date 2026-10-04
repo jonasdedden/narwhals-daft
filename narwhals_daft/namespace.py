@@ -3,28 +3,36 @@ from __future__ import annotations
 import operator
 import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import daft
 import daft.functions as F
+from narwhals._expression_parsing import (
+    combine_alias_output_names,
+    combine_evaluate_output_names,
+    evaluate_output_names_and_aliases,
+)
 from narwhals._utils import (
     Implementation,
-    ensure_path_source,
+    check_column_names_are_unique,
     not_implemented,
-    validate_separators,
 )
 from narwhals.compliant import CompliantNamespace
 
 from narwhals_daft.dataframe import DaftLazyFrame
 from narwhals_daft.expr import DaftExpr
 from narwhals_daft.selectors import DaftSelectorNamespace
-from narwhals_daft.utils import lit, narwhals_to_native_dtype
+from narwhals_daft.utils import (
+    ensure_path_source,
+    lit,
+    narwhals_to_native_dtype,
+    validate_separator,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from daft import DataFrame, Expression
-    from narwhals._typing import PluginName
     from narwhals._utils import Version
     from narwhals.dtypes import DType
     from narwhals.typing import ConcatMethod, NormalizedSource
@@ -200,15 +208,38 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
     def scan_csv(
         self, source: NormalizedSource, *, separator: str = ",", **kwds: Any
     ) -> DaftLazyFrame:
-        validate_separators(separator, ("delimiter",), kwds)
-        path = ensure_path_source(source, cast("PluginName", "daft"))
+        validate_separator(separator, kwds)
+        path = ensure_path_source(source)
         return self.from_native(daft.read_csv(path, delimiter=separator, **kwds))
 
     def scan_parquet(self, source: NormalizedSource, **kwds: Any) -> DaftLazyFrame:
-        path = ensure_path_source(source, cast("PluginName", "daft"))
+        path = ensure_path_source(source)
         return self.from_native(daft.read_parquet(path, **kwds))
 
     concat_str = not_implemented()
     corr = not_implemented()
     cov = not_implemented()
-    struct = not_implemented()
+
+    def struct(self, *exprs: DaftExpr) -> DaftExpr:
+        def func(df: DaftLazyFrame) -> list[Expression]:
+            names_and_fields = [
+                (alias, native_expr)
+                for expr in exprs
+                for native_expr, _, alias in zip(
+                    expr(df),
+                    *evaluate_output_names_and_aliases(expr, df, []),
+                    strict=True,
+                )
+            ]
+            # Daft silently keeps the last field for a repeated name, Polars raises.
+            check_column_names_are_unique([name for name, _ in names_and_fields])
+            return [
+                F.to_struct(*(field.alias(name) for name, field in names_and_fields))
+            ]
+
+        return self._expr(
+            func,
+            evaluate_output_names=combine_evaluate_output_names(*exprs),
+            alias_output_names=combine_alias_output_names(*exprs),
+            version=self._version,
+        )
