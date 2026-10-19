@@ -297,9 +297,10 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
             # Undefined when either variance is zero. Compare before `sqrt`: Daft's
             # variance of a constant column can be slightly negative, and the
             # resulting NaN would pass a `> 0` check (Daft orders NaN above all).
-            return F.when(product > lit(0.0), cov_ab / product.sqrt()).otherwise(
-                lit(float("nan"))
-            )
+            # A null product (no valid pairs) must also reach `otherwise`, which
+            # Daft's `when` skips for a null predicate.
+            defined = (product > lit(0.0)).fill_null(False)
+            return F.when(defined, cov_ab / product.sqrt()).otherwise(lit(float("nan")))
 
         return self._corr_cov(a, b, corr)
 
