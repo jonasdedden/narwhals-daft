@@ -293,9 +293,13 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
             var_a, var_b, cov_ab = self._pairwise_variances_and_covariance(
                 df, a, b, ddof=0, window=window
             )
-            denominator = (var_a * var_b).sqrt()
-            # The correlation is undefined when either variance is zero.
-            return F.when(denominator > lit(0.0), cov_ab / denominator)
+            product = var_a * var_b
+            # Undefined when either variance is zero. Compare before `sqrt`: Daft's
+            # variance of a constant column can be slightly negative, and the
+            # resulting NaN would pass a `> 0` check (Daft orders NaN above all).
+            return F.when(product > lit(0.0), cov_ab / product.sqrt()).otherwise(
+                lit(float("nan"))
+            )
 
         return self._corr_cov(a, b, corr)
 
