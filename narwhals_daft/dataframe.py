@@ -98,11 +98,6 @@ class DaftLazyFrame(
     def _iter_columns(self) -> Iterator[daft.Expression]:
         return iter(self._native_frame.columns)
 
-    def _evaluate_expr(self, expr: DaftExpr) -> Expression:
-        result: Sequence[Expression] = expr(self)
-        assert len(result) == 1  # debug assertion  # noqa: S101
-        return result[0]
-
     def _evaluate_single_output_expr(self, expr: DaftExpr, /) -> Expression:
         result = expr(self)
         if len(result) != 1:
