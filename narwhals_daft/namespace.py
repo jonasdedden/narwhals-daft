@@ -293,14 +293,15 @@ class DaftNamespace(CompliantNamespace[DaftLazyFrame, DaftExpr]):
             var_a, var_b, cov_ab = self._pairwise_variances_and_covariance(
                 df, a, b, ddof=0, window=window
             )
-            product = var_a * var_b
-            # Undefined when either variance is zero. Compare before `sqrt`: Daft's
-            # variance of a constant column can be slightly negative, and the
-            # resulting NaN would pass a `> 0` check (Daft orders NaN above all).
-            # A null product (no valid pairs) must also reach `otherwise`, which
-            # Daft's `when` skips for a null predicate.
-            defined = (product > lit(0.0)).fill_null(False)
-            return F.when(defined, cov_ab / product.sqrt()).otherwise(lit(float("nan")))
+            # Undefined when either variance is zero. Check each variance on its own:
+            # Daft's variance of a constant column can be slightly negative, and two
+            # negative variances would give a positive product. A null variance (no
+            # valid pairs) must also reach `otherwise`, which Daft's `when` skips for
+            # a null predicate. NaN inputs still propagate (Daft orders NaN above all).
+            defined = ((var_a > lit(0.0)) & (var_b > lit(0.0))).fill_null(False)
+            return F.when(defined, cov_ab / (var_a * var_b).sqrt()).otherwise(
+                lit(float("nan"))
+            )
 
         return self._corr_cov(a, b, corr)
 
