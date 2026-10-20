@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import daft.functions as F
@@ -12,6 +13,12 @@ if TYPE_CHECKING:
     from daft import Expression
 
     from narwhals_daft.expr import DaftExpr
+
+
+_REGEX_METACHARACTERS = re.compile(r"[\\^$.|?*+()\[\]{}]")
+"""Characters that make a pattern a regex rather than a literal.
+
+Polars is stricter and treats any ASCII punctuation as a regex marker."""
 
 
 class ExprStringNamespace(StringNamespace["DaftExpr"]):
@@ -145,7 +152,56 @@ class ExprStringNamespace(StringNamespace["DaftExpr"]):
     def pad_end(self, length: int, fill_char: str) -> DaftExpr:
         return self._pad(length, fill_char, start=False)
 
-    replace = not_implemented()
+    def replace(
+        self, value: DaftExpr, pattern: str, *, literal: bool, n: int
+    ) -> DaftExpr:
+        if n < 0:
+            return self.replace_all(value, pattern, literal=literal)
+        if n == 0:
+            return self.compliant
+        is_literal_pattern = literal or not _REGEX_METACHARACTERS.search(pattern)
+        if n > 1 and not (pattern and is_literal_pattern):
+            # Regex matches cannot be counted without changing the meaning of
+            # anchors and word boundaries, and an empty pattern matches between
+            # every character, so `n > 1` is limited to non-empty literal
+            # patterns.
+            kind = "regex" if pattern else "empty pattern"
+            msg = f"{kind} replacement with 'n > 1' not yet supported"
+            raise NotImplementedError(msg)
+        # Daft only ships replace-all kernels, so `head` is the leading part of
+        # the input that holds the matches to replace and `replaced` is its
+        # rewritten form. Both splice `value` in verbatim, whereas the
+        # replacement of `regexp_replace` expands `$1`/`\1` and drops
+        # backslashes.
+        needle = re.escape(pattern) if literal else pattern
+
+        def func(expr: Expression, value: Expression) -> Expression:
+            if n == 1:
+                # Group 0 is null when there is no match and group 1 is the
+                # text before the first match. `(?s:...)` lets the lazy prefix
+                # span newlines without leaking the flag into `pattern`, and
+                # the non-capturing wrapper keeps top-level alternation in
+                # `pattern` contained.
+                anchored = f"^((?s:.*?))(?:{needle})"
+                head = F.regexp_extract(expr, anchored, 0)
+                replaced = F.concat(F.regexp_extract(expr, anchored, 1), value)
+            else:
+                # Splitting on a literal pattern yields the text between
+                # non-overlapping matches, so the first `n + 1` parts end right
+                # before match `n + 1`. Neither the expression nor a compiled
+                # regex grows with `n`.
+                parts = F.slice(F.split(expr, pattern), 0, n + 1)
+                head = F.list_join(parts, pattern)
+                replaced = F.list_join(parts, value)
+            # `substr` yields null rather than "" once the offset reaches the end.
+            tail = F.substr(expr, F.length(head)).fill_null("")
+            # A null `value` leaves the input unchanged, as in Polars.
+            return F.when(head.is_null() | value.is_null(), expr).otherwise(
+                F.concat(replaced, tail)
+            )
+
+        return self.compliant._with_elementwise(func, value=value)
+
     to_datetime = not_implemented()
     to_time = not_implemented()
 
