@@ -286,7 +286,7 @@ class DaftExpr(CompliantExpr["DaftLazyFrame", "Expression"]):
         def func(df: DaftLazyFrame) -> list[Expression]:
             native_series_list = self(df)
             other_native_series = {
-                key: df._evaluate_expr(value)
+                key: df._evaluate_single_output_expr(value)
                 for key, value in expressifiable_args.items()
             }
             return [
