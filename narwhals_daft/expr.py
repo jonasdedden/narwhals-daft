@@ -286,7 +286,7 @@ class DaftExpr(CompliantExpr["DaftLazyFrame", "Expression"]):
         def func(df: DaftLazyFrame) -> list[Expression]:
             native_series_list = self(df)
             other_native_series = {
-                key: df._evaluate_expr(value)
+                key: df._evaluate_single_output_expr(value)
                 for key, value in expressifiable_args.items()
             }
             return [
@@ -340,6 +340,30 @@ class DaftExpr(CompliantExpr["DaftLazyFrame", "Expression"]):
         return self.__class__(
             self._callable_to_eval_series(call, **expressifiable_args),
             self._push_down_window_function(call, **expressifiable_args),
+            evaluate_output_names=self._evaluate_output_names,
+            alias_output_names=self._alias_output_names,
+            version=self._version,
+        )
+
+    def _with_elementwise_frame(
+        self, call: Callable[[DaftLazyFrame, Expression], Expression], /
+    ) -> DaftExpr:
+        """Like `_with_elementwise`, but `call` also receives the frame.
+
+        Useful when building the native expression needs the frame's schema.
+        """
+
+        def func(df: DaftLazyFrame) -> list[Expression]:
+            return [call(df, expr) for expr in self(df)]
+
+        def window_function(
+            df: DaftLazyFrame, window_inputs: WindowInputs
+        ) -> list[Expression]:
+            return [call(df, expr) for expr in self.window_function(df, window_inputs)]
+
+        return self.__class__(
+            func,
+            window_function,
             evaluate_output_names=self._evaluate_output_names,
             alias_output_names=self._alias_output_names,
             version=self._version,
