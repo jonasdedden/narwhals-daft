@@ -17,7 +17,6 @@ TESTS_THAT_NEED_FIX = [
     "test_cast_to_float16",
     "test_categorical",
     "test_concat_vertical",
-    "test_contains_expr",
     "test_convert_time_zone",
     "test_convert_time_zone_from_none",
     "test_corr_numerical_stability",
